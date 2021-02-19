@@ -1,3 +1,6 @@
+# Implements basic generala game (https://en.wikipedia.org/wiki/Generala)
+# This game is suited for a RL routine
+
 from random import randint
 from abc import abstractmethod, ABC
 
@@ -7,12 +10,11 @@ class Dice(object):
         self.value = None
 
     def roll(self):
-        self.value =  randint(1, 6)
+        self.value = randint(1, 6)
 
     def get_face(self):
         return self.value
 
-# Positions
 
 class Position(ABC):
     def __init__(self, id, name, **kwargs):
@@ -30,9 +32,16 @@ class Position(ABC):
     def is_checked(self):
         return self.id, self.checked
 
-# Mandatory positions class
+
 class MandatoryPosition(Position):
-    def __init__(self, value, **kwargs ):
+    """
+    Basic positions to checkout. There is 1 position for
+    each dice face from 1 to 6. The score is determined by the
+    number of dices with the required face. If any of the mandatory
+    positions is checked with less than 3 faces one time penalty of
+    -25 points (per game, not per position) is applied
+    """
+    def __init__(self, value, **kwargs):
         super().__init__(**kwargs)
         self.value = value
 
@@ -47,8 +56,13 @@ class MandatoryPosition(Position):
 
         return score, achieved
 
-#
+
 class NofKind(Position):
+    """
+    Similar to the mandatory position but without the penalty
+    and with required exact number of faces
+    5 of kind = general/ general = +50 bonus points
+    """
     def __init__(self, value, **kwargs):
         super().__init__(**kwargs)
 
@@ -78,13 +92,16 @@ class NofKind(Position):
 
 # Straight
 class Straight(Position):
+    """
+    All dices with consequent face values (regardless of the order)
+    """
     def __init__(self, is_small=True, **kwargs):
         super().__init__(**kwargs)
 
         if is_small:
-            self.value = [1,2,3,4,5]
+            self.value = [1, 2, 3, 4, 5]
         else:
-            self.value = [2,3,4,5,6]
+            self.value = [2, 3, 4, 5, 6]
 
     def checkout(self, dice_values):
 
@@ -156,14 +173,14 @@ class ScoreBoard(object):
 
     def checkout(self, id, dices):
 
-        # Asser that the given position is unchecked
+        # Assert that the given position is unchecked
         assert id in self.__get_unchecked_positions()
 
-        # Obtain the dice values
+        # Obtain the dice values in a list
         dice_values = [d.get_face() for d in dices]
 
         # One time penalty for not fulfilling the
-        # mandatory part is applied to the score
+        # mandatory part is applied to the final score
         pos_ix = self.__get_position_ix(position_id=id)
         _score, _achieved = self.positions[pos_ix].checkout(dice_values=dice_values)
 
@@ -180,11 +197,13 @@ class ScoreBoard(object):
         return _score, done
 
     def get_scoreboard_status(self):
+        """Will be called by the """
         return [int(s) for _, s in [k.is_checked() for k in self.positions]]
 
     def reset_positions(self):
-
-        # Reset the penalty flag
+        """
+        Used to  restart the game
+        """
         self.not_yet_penalized = True
         self.total_score = 0
 
@@ -193,7 +212,6 @@ class ScoreBoard(object):
             p.reset()
 
     def __get_unchecked_positions(self):
-        # Get the state of the position board:
         return [p_id for p_id, s in [k.is_checked() for k in self.positions] if not s]
 
     def __get_position_ix(self, position_id):
@@ -208,7 +226,7 @@ class ScoreBoard(object):
 
 # Main Game Class
 class GeneralGame(object):
-    def __init__(self):
+    def __init__(self, print_state=True):
 
         self.dices = [Dice() for _ in range(5)]
         self.score_board = ScoreBoard()
@@ -218,6 +236,7 @@ class GeneralGame(object):
         self.round_rolls = 0
         self.penalized = False
         self.total_score = 0
+        self.print_state = print_state
 
     def start_game(self):
 
@@ -239,15 +258,20 @@ class GeneralGame(object):
 
     def step(self, a, restart_when_done=True):
         '''
-        :param action: tuple (bool, int)
+        :param a: tuple (bool, int)
+        :param restart_when_done: bool indicating if the agent has to restart after game over
         :return (state, (action, argument), reward, done, total_score)
+
+        The game was designed to with the intention to try simplified version
+        of auto regressive policy. That is why the action is composite of two values
         '''
 
+        # Unpack, action (0: checkout position, 1: roll_dices)
         action, argument = a
-        reward = 0
 
         assert action in [0, 1]
 
+        # There are t
         if action:
             r, done = self.__roll(argument)
 
@@ -285,7 +309,7 @@ class GeneralGame(object):
 
         return reward, done
 
-    def __get_game_state(self, print_state=True):
+    def __get_game_state(self):
 
         """
         # State Vector will consist of
@@ -299,7 +323,7 @@ class GeneralGame(object):
         state_vector.extend([sum([i == j for j in self.__get_dice_face()]) for i in range(1,7)])
         state_vector.extend(self.score_board.get_scoreboard_status())
 
-        if print_state:
+        if self.print_state:
             dice_face = '|'.join([str(d) for d in self.__get_dice_face()])
             ch_positions = ', '.join([f"{p.name}: {p.checked}" for p in self.score_board.positions])
 
@@ -311,4 +335,4 @@ class GeneralGame(object):
         return [d.get_face() for d in self.dices]
 
     def __reset_remaining_rolls(self):
-        self.remaining_rolls = 3
+        self.remaining_rolls=3
