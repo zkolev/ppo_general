@@ -43,3 +43,26 @@ def get_distribution_from_logits(policy_logits, action_mask=None):
         logits=torch.where(mask, torch.full_like(policy_logits, -float("Inf")), policy_logits)
     )
     return distr
+
+def eval_policy(env, policy, iters, positions_count):
+
+    discrete_positions = set_discrete_action_space(positions_count=positions_count)
+    game = env(print_state=False)
+
+    for i in range(iters):
+        s, act, r, m = game.start_game()
+        scores = []
+        running_score = 0
+
+        while not m:
+            #Sample action
+            logits = policy(torch.tensor(s, dtype=torch.float32))
+            distr = get_distribution_from_logits(logits)
+
+            act = discrete_positions[torch.argmax(distr.probs)]
+            s, act, r, m = game.step(act)
+            running_score += r
+
+        scores.append(running_score)
+
+    return torch.tensor(r, dtype=torch.float32)

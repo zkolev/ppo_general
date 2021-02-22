@@ -8,12 +8,69 @@ from RL.common import set_discrete_action_space, get_distribution_from_logits
 from RL.ppo import ActCritNetwork
 import torch
 
-
-class Worker(object):
+class BaseWorker(object):
     def __init__(self):
         self.env = GeneralGame(print_state=False)  # init the environment
         self.all_actions = set_discrete_action_space(positions_count=len(self.env.score_board.positions))
         self.num_actions = len(self.all_actions)
+
+    def sample_action(self, game_state, policy_logits, most_probable=False):
+
+        """
+        s: torch tensor float32 (1 X D)
+        policy_logits:
+        returns: triple action torch int32 size [1]
+                        log_prob torch float32 size [1x1]
+                        mask torch boolean size [1 X num_actions]
+
+        Validates actions againts the state
+        The state array:
+        ix 0: remaining rolls
+        ix 1-5: dice faces
+        ix 6:19: is position checked
+
+        TODO: It can be improved
+
+        """
+        # Init the action mask:
+        mask = torch.zeros_like(policy_logits, dtype=torch.bool)
+        _s = game_state.squeeze(0)
+
+        for i, j in enumerate(self.all_actions):
+
+            # Checkout
+            if j[0] == 0 and _s[(i + 7)] == 1:
+                mask[0, i] = True
+
+            # No remaining rolls
+            elif _s[0] == 0 and j[0] == 1:
+                mask[0, i] = True
+
+            # If the position is checked
+            else:
+                continue
+
+        # Init distribution and sample action:
+        distr = get_distribution_from_logits(policy_logits=policy_logits,
+                                             action_mask=mask)
+
+        # Sample random action or take the one
+        # with the highest probability
+        if most_probable:
+            action = torch.argmax(distr.probs).unsqueeze(0)
+
+        else:
+            action = distr.sample()
+
+        log_prob = torch.log(distr.probs).gather(1, action.unsqueeze(0))
+
+        return action, log_prob, mask
+
+
+# Stateful worker for samples generation
+class RolloutsWorker(BaseWorker):
+    def __init__(self):
+        super(RolloutsWorker, self).__init__()
 
         # Get the initial state of the game
         self.current_state, _, _, _ = self.env.start_game()
@@ -21,7 +78,6 @@ class Worker(object):
 
         self.current_state = torch.tensor([self.current_state], dtype=torch.float32)
 
-        # Init the neural network
 
         self.network = ActCritNetwork(input_size=self.state_size,
                                       num_actions=self.num_actions)
@@ -56,7 +112,7 @@ class Worker(object):
             with torch.no_grad():
                 v_s, pi_s = self.network(self.current_state)
 
-            act, old_pi_s, _act_masks = self.__sample_action(pi_s)
+            act, old_pi_s, _act_masks = self.sample_action(self.current_state, pi_s)
 
             s, a, r, m = self.env.step(a=self.all_actions[int(act)])
 
@@ -119,51 +175,56 @@ class Worker(object):
         return returns, advantages
 
 
+class EvalWorker(BaseWorker):
+    def __init__(self):
+        super(EvalWorker, self).__init__()
 
-    def __sample_action(self, policy_logits):
+        # Get the initial state of the game
+        self.current_state, _, _, _ = self.env.start_game()
+        self.state_size = len(self.current_state)
 
-        """
-        s: torch tensor float32 (1 X D)
-        policy_logits:
-        returns: triple action torch int32 size [1]
-                        log_prob torch float32 size [1x1]
-                        mask torch boolean size [1 X num_actions]
+        self.current_state = torch.tensor([self.current_state], dtype=torch.float32)
 
-        Validates actions againts the state
-        The state array:
-        ix 0: remaining rolls
-        ix 1-5: dice faces
-        ix 6:19: is position checked
 
-        TODO: It can be improved
+        self.network = ActCritNetwork(input_size=self.state_size,
+                                      num_actions=self.num_actions)
 
-        """
-        # Init the action mask:
-        mask = torch.zeros_like(policy_logits, dtype=torch.bool)
-        _s = self.current_state.squeeze(0)
+    def __enter__(self, *args, **kwargs):
+        return self
 
-        for i, j in enumerate(self.all_actions):
+    def __exit__(self, *args, **kwargs):
+        pass
 
-            # Checkout
-            if j[0] == 0 and _s[(i + 7)] == 1:
-                mask[0, i] = True
+    def eval_policy(self, n_iter, weights):
 
-            # No remaining rolls
-            elif _s[0] == 0 and j[0] == 1:
-                mask[0, i] = True
+        self.network.load_state_dict(weights)
+        scores = torch.zeros(size=(n_iter, 1), dtype=torch.float32)
 
-            # If the position is checked
-            else:
-                continue
+        for i in range(n_iter):
+            score = 0
+            s, a, r, done = self.env.start_game()
+            s = torch.tensor([s], dtype=torch.float32)
 
-        # Init distribution and sample action:
-        distr = get_distribution_from_logits(policy_logits=policy_logits,
-                                             action_mask=mask)
+            while not done:
+                # Get the predictions
+                _, pi_s = self.network(s)
 
-        action = distr.sample()
+                # Sample action
+                act, _, _ = self.sample_action(policy_logits=pi_s,
+                                               game_state=s,
+                                               most_probable=True)
 
-        log_prob = torch.log(distr.probs).gather(1, action.unsqueeze(0))
+                # Step
+                s, a, r, done = self.env.step(self.all_actions[int(act)])
 
-        return action, log_prob, mask
+                # Increment score and convert to tensor
+                score += r
+                s = torch.tensor([s], dtype=torch.float32)
+
+            scores[i] = float(score)
+
+        return scores
+
+
 
 

@@ -1,21 +1,26 @@
 import torch
+import torch.nn.functional as fn
 from RL.common import get_distribution_from_logits
 
 
 class GeneralGameTrajectories(torch.utils.data.Dataset):
-    def __init__(self, rollouts):
+    def __init__(self, rollouts, normalize_advantages=True):
         super(GeneralGameTrajectories).__init__()
 
         traj_keys = ["states", "actions", "action_masks", "returns",
-                     "advantages", "old_pi_logits" ]
+                     "advantages", "old_pi_logits"]
 
         self.data = {}
         for k in traj_keys:
-            self.data[k]=torch.cat([d[k] for d in rollouts])
+            self.data[k] = torch.cat([d[k] for d in rollouts])
+
+        # Normalize advantages:
+        if normalize_advantages:
+            self.data['advantages'] = (self.data['advantages'] - self.data['advantages'].mean()) \
+                                      / (self.data['advantages'].std() + 1e-5)
 
         # Get the size of the data
         self.n_samples = self.data['states'].size()[0]
-
 
     def __getitem__(self, index):
         return {k: self.data[k][index] for k in self.data}
@@ -29,10 +34,13 @@ class ActCritNetwork(torch.nn.Module):
         super(ActCritNetwork, self).__init__()
         self.in_layer = torch.nn.Linear(input_size, 20)
         self.l_1 = torch.nn.Linear(20, 10)
-        self.l_2 = torch.nn.Linear(10, 5)
+        # self.l_2 = torch.nn.Linear(10, 5)
 
-        self.pl = torch.nn.Linear(5, num_actions)
-        self.out = torch.nn.Linear(5, 1)
+        self.pl_1 = torch.nn.Linear(10, 10)
+        self.pl_out = torch.nn.Linear(10, num_actions)
+
+        self.v_1 = torch.nn.Linear(10, 5)
+        self.v_out = torch.nn.Linear(5, 1)
 
         # Disable gradient calculation
         if eval_only:
@@ -40,10 +48,13 @@ class ActCritNetwork(torch.nn.Module):
 
     def forward(self, input_data):
         # input_data = torch.from_numpy(x).float().detach()
-        x = self.in_layer(input_data)
-        x = self.l_1(x)
-        x = self.l_2(x)
-        return self.out(x), self.pl(x)
+        x = fn.relu(self.in_layer(input_data))
+        x = fn.relu(self.l_1(x))
+
+        pl = fn.relu(self.pl_1(x))
+        vlr = fn.relu(self.v_1(x))
+
+        return self.v_out(vlr), self.pl_out(pl)
 
     def sample_action(self, x, action_mask=None):
         """action_mask: boolean tensor of the same shape as x """
@@ -59,12 +70,13 @@ class PPO(object):
     def __init__(self,
                  input_size,
                  num_actions,
-                 lr = 1e-3,
+                 lr=1e-3,
                  minibatch_size=128,
                  clip=0.2,
                  w_policy=1,
-                 w_vf=1,
-                 w_entropy=1):
+                 w_vf=0.5,
+                 w_entropy=1,
+                 writer=None):
 
         self.network = ActCritNetwork(input_size=input_size,
                                       num_actions=num_actions,
@@ -72,13 +84,15 @@ class PPO(object):
         # Optimizer
         self.optimizer = torch.optim.Adam(self.network.parameters(), lr=lr)
 
-
         self.w_policy = w_policy
         self.w_entropy = w_entropy
         self.w_vf = w_vf
         self.clip = clip
-        self.minibatch_size =minibatch_size
+        self.minibatch_size = minibatch_size
 
+        self.global_step = 0
+        self.updates = 0
+        self.writer = writer
 
     def update(self, traj, epochs=5):
         """
@@ -108,42 +122,68 @@ class PPO(object):
                                          num_workers=2)
 
         for epoch in range(epochs):
+
+            p_loss, v_loss, e_loss, c_loss = [], [], [], []
+
             for i, b in enumerate(dl):
 
                 self.optimizer.zero_grad()
-                loss = self.__ppo_loss(s=b['states'],
-                                       a=b['actions'],
-                                       g=b['returns'],
-                                       old_pol_log_pi=b['old_pi_logits'],
-                                       advantages=b['advantages'],
-                                       action_masks=b['action_masks']
-                                       )
-                print(f"Epoch {epoch}, batch {i}, loss: {loss}" )
+                policy_loss, value_loss,  entropy_loss = self.__ppo_loss(**b)
+                loss = - self.w_policy * policy_loss + \
+                       self.w_vf * value_loss + \
+                       - self.w_entropy * entropy_loss
+
+                # add loss to list
+                p_loss.append(policy_loss.item())
+                v_loss.append(value_loss.item())
+                e_loss.append(entropy_loss.item())
+                c_loss.append(loss.item())
+
+                # Update
                 loss.backward()
                 self.optimizer.step()
 
+
+        if self.writer:
+            for l_label, l_value in zip(['loss', 'policy', 'value', 'entropy'],[c_loss, p_loss, v_loss, e_loss]):
+                self.writer.add_scalar(f'Loss/{l_label}', torch.tensor(l_value).mean(), self.updates)
+
+            self.updates += 1
+
+        print(f"Loss after update {self.updates} is {torch.tensor(c_loss).mean().item()}")
         return self.network.state_dict()
 
-    def __ppo_loss(self, s, a, g, old_pol_log_pi, advantages, action_masks=None):
+    def __ppo_loss(self,
+                   states,
+                   actions,
+                   returns,
+                   old_pi_logits,
+                   advantages,
+                   action_masks=None,
+                   **kwargs):
         # The input will be tensors
 
         # We get logits estimate
-        v_hat, p_hat = self.network(s)
+        v_hat, p_hat = self.network(states)
         distr = get_distribution_from_logits(p_hat, action_masks)
 
         # Value loss
-        value_loss = self.w_vf * torch.mean((v_hat - g) ** 2)
+        value_loss = torch.mean((v_hat - returns) ** 2)
 
         # Entropy loss
-        entropy_loss = self.w_entropy * (torch.mean(distr.entropy()))
+        entropy_loss = torch.mean(distr.entropy())
 
         # Policy Loss
-        action_log_pi = p_hat.gather(1, a)
-        ratio = action_log_pi - old_pol_log_pi
+        action_log_pi = p_hat.gather(1, actions)
+        ratio = action_log_pi - old_pi_logits
         surr_1 = ratio * advantages
         surr_2 = torch.clamp(ratio, min=1.0 - self.clip, max=1 + self.clip) * advantages
 
-        policy_loss = - self.w_policy * torch.min(surr_1, surr_2).mean()
+        policy_loss = torch.min(surr_1, surr_2).mean()
 
-        return policy_loss + value_loss + entropy_loss
+        # if self.writer is not None:
+        #     self.writer.add_scalar('Loss/entropy', entropy_loss.mean(), self.global_step)
+        #     self.writer.add_scalar('Loss/value', value_loss.mean(), self.global_step)
+        #     self.writer.add_scalar('Loss/policy', policy_loss.mean(), self.global_step)
 
+        return policy_loss, value_loss,  entropy_loss
