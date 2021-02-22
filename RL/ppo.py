@@ -76,7 +76,9 @@ class PPO(object):
                  w_policy=1,
                  w_vf=0.5,
                  w_entropy=1,
-                 writer=None):
+                 writer=None,
+                 global_step=0,
+                 chkpt= None):
 
         self.network = ActCritNetwork(input_size=input_size,
                                       num_actions=num_actions,
@@ -93,6 +95,7 @@ class PPO(object):
         self.global_step = 0
         self.updates = 0
         self.writer = writer
+
 
     def update(self, traj, epochs=5):
         """
