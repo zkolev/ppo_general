@@ -9,7 +9,7 @@ import os
 
 import torch
 
-
+from RL.a2c import A2C
 
 INPUT_SIZE = 21 # State representation
 OUTPUT_SIZE = 45 #Num actions
@@ -34,115 +34,32 @@ NUMBER_OF_UPDATES = 2000
 EVAL_EVERY_N_UPDATES = 5
 N_GAMES_FOR_EVAL = 125
 
-HISTOGRAM_EVERY_N_UPDATES = 50 
+HISTOGRAM_EVERY_N_UPDATES = 50
+
+PPO_CLIP_NORM = 0.2
 
 LOSS_POLICY_WEIGHT = 1
 LOSS_VALUE_WEIGHT = 0.20
-LOSS_ENTROPY_WEIGHT = 0.05
+LOSS_ENTROPY_WEIGHT = 0.01
 
 if __name__ == "__main__":
-    
 
-    # Create root dir relative to the place 
-    # TODO: To export the routine as function/class 
+    a2c = A2C(input_size=INPUT_SIZE,
+             num_actions=OUTPUT_SIZE,
+             lr=LEARNING_RATE,
+             minibatch_size=MINIBATCH_SIZE,
+             clip=PPO_CLIP_NORM,
+             w_policy=LOSS_POLICY_WEIGHT,
+             w_vf=LOSS_VALUE_WEIGHT,
+             w_entropy=LOSS_ENTROPY_WEIGHT,
+             writer=None,
+             global_step=0,
+             chkpt= None)
 
-    root_dir = os.path.abspath(__file__ + '/..')
-
-    if PAYLOAD_ROOT_DIR:
-        root_dir = payload_root_dir
-    
-    # Create Derive the name of the model 
-    if MODEL_NAME:
-        mdl_name = str(MODEL_NAME)
-    else:
-        # The timestamp 
-        mdl_name = str(int(time.time()))
-
-    fs_loc = {}
-    for subdir in ['checkpoints', 'tensorboard']:
-        _loc = os.path.join(root_dir,'training_payload', subdir, mdl_name)
-        os.makedirs(_loc,exist_ok=True)
-        fs_loc[subdir] = _loc
-
-    
-    
-    # Init meta parameters:
-    _start_iter = 0
-    _global_step = 0
-
-    # Load Latest chkpt 
-    # TODO: To implement better restoring routine
-    #        The curren routine relly on the naming  
-    #        convention of the chekpoint 
-
-    if RESTORE:
-        # If specified restore from chkpt 
-        # Else restore from latest 
-        if MODEL_CHECKPOINT is None:
-            try:
-                torch.load(os.path.join(fs_loc['checkpoints'], MODEL_CHECKPOINT))
-            except: 
-                sorted(os.listdir(fs_loc['checkpoints']), reverse=True)
-
-
-    # INIT OBJECTS
-    game = GeneralGame()
-    
-    batch_writer = SummaryWriter(f"{fs_loc['tensorboard']}\{'batch_writer'}", purge_step=_global_step)
-    update_writer = SummaryWriter(f"{fs_loc['tensorboard']}\{'update_writer'}", purge_step=_start_iter) #TODO: Programatically assighn root dir
-    w = RolloutsWorker()    
-
-    # Policy
-    ppo = PPO(INPUT_SIZE, OUTPUT_SIZE,
-              minibatch_size=MINIBATCH_SIZE,
-              lr=LEARNING_RATE,
-              writer=batch_writer,
-              w_policy=LOSS_POLICY_WEIGHT,
-              w_vf=LOSS_VALUE_WEIGHT,
-              w_entropy=LOSS_ENTROPY_WEIGHT,
-              global_step=_global_step
-              )
-
-
-
-    
-    weights = ppo.network.state_dict()
-
-
-    # Main loop
-    for i in range(_start_iter, _start_iter + NUMBER_OF_UPDATES):
-
-        print(f'POLICY UPDATE  {i} ... ')
-        traj = w.roll_out(weights, ROLLOUT_SIZE, GAMMA, LAMBDA)
-
-        weights = ppo.update(traj=[traj],
-                             epochs=EPOCHS_PER_UPDATE)
-
-        if i % EVAL_EVERY_N_UPDATES == 0:
-            print(f"EVALUATING POLICY ")
-
-            with torch.no_grad():
-                with EvalWorker() as e:
-                    scores = e.eval_policy(N_GAMES_FOR_EVAL, weights)
-
-            update_writer.add_scalar('Score\Average', scores.mean(), global_step=i)
-
-            if i % HISTOGRAM_EVERY_N_UPDATES == 0:
-                update_writer.add_histogram('Score\Distribution', scores, global_step=i)
-
-                # Add the weights 
-                for wk in weights:
-                    update_writer.add_histogram(wk.replace('.', '/'), weights[wk], global_step=i)
-
-
-        # Save checkpoint 
-        if i % CHECKPOINT_EVERY_N_UPDATES == 0:
-            _fname = f"{int(time.time())}_{MODEL_NAME}_Update_{i}.pth" 
-            chkpt = os.path.join(fs_loc['checkpoints'], _fname)
-            print(f'Checkpoint to {chkpt} ... ')
-
-            torch.save({'update': i, 
-                        'global_step': ppo.global_step, 
-                        'model_state_dict': weights, 
-                        'optimizer_state_dict': ppo.optimizer.state_dict()}, 
-                        chkpt)
+    # Run a2c
+    a2c.run(n_workers=2,
+            updates = 2,
+            epochs=5,
+            steps =32,
+            gamma=GAMMA,
+            lam= LAMBDA)

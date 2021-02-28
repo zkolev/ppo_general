@@ -65,7 +65,6 @@ class ActCritNetwork(torch.nn.Module):
 
         return distr.sample()
 
-
 class PPO(object):
     def __init__(self,
                  input_size,
