@@ -38,8 +38,6 @@ class ParWorker(RolloutsWorker):
                 self.s_init_done.value = False
                 self.s_channel.send(traj)
 
-                print(f"========= {self.w_name} ===========")
-                print(self.network.state_dict())
             else:
                 # Wait until update finishes
                 time.sleep(1)

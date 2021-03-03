@@ -75,9 +75,7 @@ class PPO(object):
                  w_policy=1,
                  w_vf=0.5,
                  w_entropy=1,
-                 writer=None,
-                 global_step=0,
-                 chkpt= None):
+                 epoch_writer=None):
 
         self.network = ActCritNetwork(input_size=input_size,
                                       num_actions=num_actions,
@@ -93,7 +91,7 @@ class PPO(object):
 
         self.global_step = 0
         self.updates = 0
-        self.writer = writer
+        self.writer = epoch_writer
 
 
     def update(self, traj, epochs=5):
@@ -182,10 +180,5 @@ class PPO(object):
         surr_2 = torch.clamp(ratio, min=1.0 - self.clip, max=1 + self.clip) * advantages
 
         policy_loss = torch.min(surr_1, surr_2).mean()
-
-        # if self.writer is not None:
-        #     self.writer.add_scalar('Loss/entropy', entropy_loss.mean(), self.global_step)
-        #     self.writer.add_scalar('Loss/value', value_loss.mean(), self.global_step)
-        #     self.writer.add_scalar('Loss/policy', policy_loss.mean(), self.global_step)
 
         return policy_loss, value_loss,  entropy_loss

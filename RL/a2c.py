@@ -5,6 +5,9 @@ from multiprocessing import Process, Pipe, Manager, Value
 
 from RL.ppo import PPO
 from RL.parallel_worker import ParWorker
+from RL.worker import  EvalWorker
+import torch
+import os
 
 import time
 
@@ -15,7 +18,7 @@ def init_worker(constructor, **kwargs):
 
 
 class A2C(PPO):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, model_name,  *args, **kwargs):
         super(A2C, self).__init__(*args, **kwargs)
 
         s_manager = Manager()
@@ -26,10 +29,11 @@ class A2C(PPO):
         self.s_channels = [] # MP pipe
 
         self.__update_shared_weights()
+        self.model_name = model_name
 
 
-
-    def run(self, n_workers, updates, epochs, steps, gamma, lam):
+    def run(self, n_workers, updates, epochs, steps, gamma, lam,
+            step_writer, eval_steps, eval_iters, fs_loc ):
 
         workers, channels, rollouts_done, inits_done = \
             self.__start_workers(n_workers,steps, gamma, lam)
@@ -61,6 +65,26 @@ class A2C(PPO):
                 new_weights = self.update(traj, epochs)
 
 
+                # Update eval
+                if epoch % eval_steps == 0:
+                    print('Evaluating policy ... ')
+                    with torch.no_grad():
+                        with EvalWorker() as e:
+                            scores = e.eval_policy(eval_iters, new_weights)
+
+                    step_writer.add_scalar('Scores\Average', scores.mean(), global_step = epoch)
+
+                # Update histograms:
+                if epoch % 50 == 0:
+                    step_writer.add_histogram('Scores\Distribution', scores, global_step=epoch)
+
+                    for wk in new_weights:
+                        step_writer.add_histogram(wk.replace('.', '/'), new_weights[wk], global_step=epoch)
+
+                if epoch % 50 == 0:
+                    _fname = f"{int(time.time())}_{self.model_name}_Update_{epoch}.pth"
+                    chkpt = os.path.join(fs_loc['checkpoints'], _fname)
+                    print(f'Checkpoint to {chkpt} ... ')
 
         self.__terminate_workers(workers)
 
