@@ -32,14 +32,14 @@ class GeneralGameTrajectories(torch.utils.data.Dataset):
 class ActCritNetwork(torch.nn.Module):
     def __init__(self, input_size, num_actions, eval_only=True):
         super(ActCritNetwork, self).__init__()
-        self.in_layer = torch.nn.Linear(input_size, 20)
-        self.l_1 = torch.nn.Linear(20, 10)
+        self.in_layer = torch.nn.Linear(input_size, 25)
+        self.l_1 = torch.nn.Linear(25, 15)
         # self.l_2 = torch.nn.Linear(10, 5)
 
-        self.pl_1 = torch.nn.Linear(10, 10)
+        self.pl_1 = torch.nn.Linear(15, 10)
         self.pl_out = torch.nn.Linear(10, num_actions)
 
-        self.v_1 = torch.nn.Linear(10, 5)
+        self.v_1 = torch.nn.Linear(15, 5)
         self.v_out = torch.nn.Linear(5, 1)
 
         # Disable gradient calculation

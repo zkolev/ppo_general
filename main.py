@@ -4,10 +4,10 @@ from RL.a2c import A2C
 from torch.utils.tensorboard import SummaryWriter
 import os
 import time
+from torch.multiprocessing import set_start_method
 
-
-INPUT_SIZE = 21 # State representation
-OUTPUT_SIZE = 45 # Num actions
+INPUT_SIZE = 21  # State representation
+OUTPUT_SIZE = 45  # Num actions
 PERSIST_STATE = True
 PAYLOAD_ROOT_DIR = None
 TENSORBOARD_LOC = None
@@ -17,6 +17,7 @@ MODEL_NAME = 'A2C_Run_2_0_0'
 RESTORE = False
 MODEL_CHECKPOINT = None 
 CHECKPOINT_EVERY_N_UPDATES = 25
+NUMBER_OF_WORKERS  = 4
 
 LEARNING_RATE = 2.5e-3
 MINIBATCH_SIZE = 1024
@@ -24,7 +25,9 @@ ROLLOUT_SIZE = 8192
 EPOCHS_PER_UPDATE = 5
 GAMMA = 0.99
 LAMBDA = 0.95
-NUMBER_OF_UPDATES = 2000
+NUMBER_OF_UPDATES = 3000
+
+
 
 EVAL_EVERY_N_UPDATES = 5
 N_GAMES_FOR_EVAL = 125
@@ -59,13 +62,13 @@ for subdir in ['checkpoints', 'tensorboard']:
 
 
 if __name__ == "__main__":
-
+    set_start_method('spawn')
     _global_step = 0
     _start_iter = 0
 
     # Init writers
-    epoch_writer = SummaryWriter(f"{fs_loc['tensorboard']}\{'epoch_writer'}", purge_step=_global_step)
-    step_writer = SummaryWriter(f"{fs_loc['tensorboard']}\{'update_writer'}", purge_step=_start_iter)
+    epoch_writer = SummaryWriter(f"{fs_loc['tensorboard']}/{'epoch_writer'}", purge_step=_global_step)
+    step_writer = SummaryWriter(f"{fs_loc['tensorboard']}/{'update_writer'}", purge_step=_start_iter)
 
     a2c = A2C(input_size=INPUT_SIZE,
              num_actions=OUTPUT_SIZE,
@@ -79,13 +82,13 @@ if __name__ == "__main__":
              model_name=MODEL_NAME)
 
     # Run a2c
-    a2c.run(n_workers=4,
-            updates=2000,
+    a2c.run(n_workers=NUMBER_OF_WORKERS,
+            updates=NUMBER_OF_UPDATES,
             epochs=5,
-            steps=int(4 *1024),
+            steps=int(8 *1024),
             gamma=GAMMA,
             lam=LAMBDA,
             fs_loc=fs_loc,
             step_writer=step_writer,
-            eval_steps=5,
-            eval_iters=125)
+            eval_steps=10,
+            eval_iters=150)

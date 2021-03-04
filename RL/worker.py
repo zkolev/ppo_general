@@ -136,7 +136,6 @@ class RolloutsWorker(BaseWorker):
 
         G, ADV = self.__compute_gae(vs=VS, r=R, masks=M,  gamma=gamma, lam=lam)
 
-
         return {
                 'states': S,
                 'actions': A,
@@ -157,7 +156,7 @@ class RolloutsWorker(BaseWorker):
         :return:
         """
 
-        B, D = r.size()
+        # B, D = r.size()
         gae = 0
         returns = torch.zeros_like(r, dtype=torch.float32)
 
@@ -184,7 +183,6 @@ class EvalWorker(BaseWorker):
         self.state_size = len(self.current_state)
 
         self.current_state = torch.tensor([self.current_state], dtype=torch.float32)
-
 
         self.network = ActCritNetwork(input_size=self.state_size,
                                       num_actions=self.num_actions)

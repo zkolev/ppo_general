@@ -1,7 +1,6 @@
 # Import multiprocessing
 
-import multiprocessing as mp
-from multiprocessing import Process, Pipe, Manager, Value
+from torch.multiprocessing import Process, Pipe, Manager, Value
 
 from RL.ppo import PPO
 from RL.parallel_worker import ParWorker
@@ -11,10 +10,10 @@ import os
 
 import time
 
+
 def init_worker(constructor, **kwargs):
     worker = constructor(**kwargs)
     worker.run()
-
 
 
 class A2C(PPO):
@@ -25,7 +24,7 @@ class A2C(PPO):
 
         self.s_weights = s_manager.dict()
 
-        self.s_start_rollouts = mp.Value('b', False)
+        self.s_start_rollouts = Value('b', False)
         self.s_channels = [] # MP pipe
 
         self.__update_shared_weights()
@@ -36,10 +35,9 @@ class A2C(PPO):
             step_writer, eval_steps, eval_iters, fs_loc ):
 
         workers, channels, rollouts_done, inits_done = \
-            self.__start_workers(n_workers,steps, gamma, lam)
+            self.__start_workers(n_workers, steps, gamma, lam)
 
         # Wait for workers init
-
         while not all(inits_done):
 
             print('Waiting for workers initialization ... ')
@@ -96,7 +94,7 @@ class A2C(PPO):
         for _i in range(n_workers):
 
             # Set worker params
-            par_chnl, child_chnl = mp.Pipe()
+            par_chnl, child_chnl = Pipe()
             worker_name = f"Worker_{_i}"
             rollout_done = Value('b', False)
             init_done = Value('b', False)
@@ -120,7 +118,6 @@ class A2C(PPO):
             rollouts_done.append(rollout_done)
             inits_done.append(init_done)
 
-
         return workers, channels, rollouts_done, inits_done
 
 
@@ -130,11 +127,10 @@ class A2C(PPO):
         for i in inits_done:
             i.value = True
 
-    def __update_shared_weights(self):
-        _state_dict = self.network.state_dict()
-        # Update the shared weights
-        for k in _state_dict:
-            self.s_weights[k] = _state_dict[k]
+    def __update_shared_weights(self, dev='cpu'):
+        """ Expose new weights to workers after each update """
+        self.s_weights = {k: v.to(torch.device(dev))
+                          for k, v in self.network.state_dict().items()}
 
     @staticmethod
     def __terminate_workers(workers):

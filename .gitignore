@@ -3,7 +3,7 @@ __pycache__/
 training_payload/
 *.py[cod]
 .idea/
-
+venv/
 # C extensions
 *.so
 
