@@ -2,6 +2,7 @@
 # This game is suited for a RL routine
 
 from random import randint
+from itertools import combinations
 from abc import abstractmethod, ABC
 
 
@@ -141,7 +142,7 @@ class FullHouse(Position):
             n = sum([i == k for k in dice_values])
             z.append(n)
 
-        if len(z) <=2 and min(z) > 1:
+        if len(z) <= 2 and min(z) > 1:
             score = sum(dice_values)
 
         return score, True
@@ -226,7 +227,7 @@ class ScoreBoard(object):
 
 # Main Game Class
 class GeneralGame(object):
-    def __init__(self, print_state=True):
+    def __init__(self):
 
         self.dices = [Dice() for _ in range(5)]
         self.score_board = ScoreBoard()
@@ -236,7 +237,7 @@ class GeneralGame(object):
         self.round_rolls = 0
         self.penalized = False
         self.total_score = 0
-        self.print_state = print_state
+        self.discrete_action_space = self.__set_discrete_action_space()
 
     def start_game(self):
 
@@ -256,22 +257,25 @@ class GeneralGame(object):
 
         return s, None, 0, 0
 
-    def step(self, a, restart_when_done=True):
-        '''
-        :param a: tuple (bool, int)
-        :param restart_when_done: bool indicating if the agent has to restart after game over
-        :return (state, (action, argument), reward, done, total_score)
+    def step(self, a, restart_when_done=False, simple_action=True, verbose = False):
+        """
+        param" a: int if  simple_action else  tuple (bool, int)
+        param: restart_when_done: bool indicating if the agent has to restart after game over
+        param: simple_action type(bool): indicates if the action should be simple integer. If false
+               the step function expects tuple of (bool, list/int) as valid action
+
+        return: (state, (action, argument), reward, done, total_score)
 
         The game was designed to with the intention to try simplified version
         of auto regressive policy. That is why the action is composite of two values
-        '''
+        """
 
-        # Unpack, action (0: checkout position, 1: roll_dices)
-        action, argument = a
+        if simple_action:
+            action, argument = self.discrete_action_space[a]
+        else:
+            action, argument = a
+            assert action in [0, 1]
 
-        assert action in [0, 1]
-
-        # There are t
         if action:
             r, done = self.__roll(argument)
 
@@ -284,7 +288,7 @@ class GeneralGame(object):
                 _ = self.start_game()
 
         # Get state
-        s = self.__get_game_state()
+        s = self.__get_game_state(verbose)
 
         return s, a, r, done
 
@@ -309,7 +313,7 @@ class GeneralGame(object):
 
         return reward, done
 
-    def __get_game_state(self):
+    def __get_game_state(self, verbose=False):
 
         """
         # State Vector will consist of
@@ -323,7 +327,7 @@ class GeneralGame(object):
         state_vector.extend([sum([i == j for j in self.__get_dice_face()]) for i in range(1,7)])
         state_vector.extend(self.score_board.get_scoreboard_status())
 
-        if self.print_state:
+        if verbose:
             dice_face = '|'.join([str(d) for d in self.__get_dice_face()])
             ch_positions = ', '.join([f"{p.name}: {p.checked}" for p in self.score_board.positions])
 
@@ -336,3 +340,15 @@ class GeneralGame(object):
 
     def __reset_remaining_rolls(self):
         self.remaining_rolls=3
+
+    def __set_discrete_action_space(self):
+        # Checkout position actions:
+        actions = [(0, p) for p in range(len(self.score_board.positions))]
+
+        # Roll dice actions
+        for i in range(5):
+            actions += [(1, list(k)) for k in combinations(range(5), (i + 1))]
+
+        return actions
+
+

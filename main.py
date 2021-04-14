@@ -1,94 +1,83 @@
 """ Reinforcement learning agent for general game"""
 
-from RL.a2c import A2C
-from torch.utils.tensorboard import SummaryWriter
-import os
+
 import time
-from torch.multiprocessing import set_start_method
 
-INPUT_SIZE = 21  # State representation
-OUTPUT_SIZE = 45  # Num actions
-PERSIST_STATE = True
-PAYLOAD_ROOT_DIR = None
-TENSORBOARD_LOC = None
-MODEL_NAME = 'A2C_Run_2_0_0'
 
-# Restore 
-RESTORE = False
-MODEL_CHECKPOINT = None 
-CHECKPOINT_EVERY_N_UPDATES = 25
-NUMBER_OF_WORKERS  = 4
+from RL.dqn import DQN, Agent, ReplayBuffer, q_loss
+import torch
+from torch.optim import Adam
+from torch.utils.tensorboard import SummaryWriter
 
-LEARNING_RATE = 2.5e-3
-MINIBATCH_SIZE = 1024
-ROLLOUT_SIZE = 8192
-EPOCHS_PER_UPDATE = 5
-GAMMA = 0.99
-LAMBDA = 0.95
-NUMBER_OF_UPDATES = 3000
+force_cpu = True
+device = torch.device('cuda' if torch.cuda.is_available() and not force_cpu else 'cpu')
+
+
+REPLAY_BUFFER_SIZE = int(2.5e4)
+EPSILON_START = 1.0
+EPSILON_END = 0.05
+EPSILON_DECAY_STEPS = int(2.5e5)
+TARGET_NETWORK_SYNC_STEPS = 5000
+BATCH_SIZE = (1024)
 
 
 
-EVAL_EVERY_N_UPDATES = 5
-N_GAMES_FOR_EVAL = 125
+if __name__ == '__main__':
 
-HISTOGRAM_EVERY_N_UPDATES = 50
+    q_network = DQN(21, 45).to(device)
+    tgt_net = DQN(21, 45).to(device)
+    buffer = ReplayBuffer(REPLAY_BUFFER_SIZE)
+    rl_agent = Agent(buffer=buffer)
+    optimizer = Adam(q_network.parameters(),  1e-4)
 
-PPO_CLIP_NORM = 0.2
+    # writer = SummaryWriter(comment="General Game")
 
-LOSS_POLICY_WEIGHT = 1
-LOSS_VALUE_WEIGHT = 0.10
-LOSS_ENTROPY_WEIGHT = 0.01
+    # Data placehoders:
 
-
-root_dir = os.path.abspath(__file__ + '/..')
-
-if PAYLOAD_ROOT_DIR:
-        root_dir = PAYLOAD_ROOT_DIR
-
-# Create Derive the name of the model
-if MODEL_NAME:
-    mdl_name = str(MODEL_NAME)
-
-else:
-    # The timestamp
-    mdl_name = str(int(time.time()))
-
-fs_loc = {}
-for subdir in ['checkpoints', 'tensorboard']:
-    _loc = os.path.join(root_dir,'training_payload', subdir, mdl_name)
-    os.makedirs(_loc,exist_ok=True)
-    fs_loc[subdir] = _loc
+    n_steps = 0
+    ts_steps = 0
+    ts = time.time()
+    best_avg_reward = None
+    total_scores = []
 
 
-if __name__ == "__main__":
-    set_start_method('spawn')
-    _global_step = 0
-    _start_iter = 0
+    # Init the buffer
 
-    # Init writers
-    epoch_writer = SummaryWriter(f"{fs_loc['tensorboard']}/{'epoch_writer'}", purge_step=_global_step)
-    step_writer = SummaryWriter(f"{fs_loc['tensorboard']}/{'update_writer'}", purge_step=_start_iter)
+    while len(buffer) < REPLAY_BUFFER_SIZE:
+        _ = rl_agent.play_step(net=q_network, epsilon=1.0, device=device)
 
-    a2c = A2C(input_size=INPUT_SIZE,
-             num_actions=OUTPUT_SIZE,
-             lr=LEARNING_RATE,
-             minibatch_size=MINIBATCH_SIZE,
-             clip=PPO_CLIP_NORM,
-             w_policy=LOSS_POLICY_WEIGHT,
-             w_vf=LOSS_VALUE_WEIGHT,
-             w_entropy=LOSS_ENTROPY_WEIGHT,
-             epoch_writer=epoch_writer,
-             model_name=MODEL_NAME)
+    for i in range(30):
 
-    # Run a2c
-    a2c.run(n_workers=NUMBER_OF_WORKERS,
-            updates=NUMBER_OF_UPDATES,
-            epochs=5,
-            steps=int(8 *1024),
-            gamma=GAMMA,
-            lam=LAMBDA,
-            fs_loc=fs_loc,
-            step_writer=step_writer,
-            eval_steps=10,
-            eval_iters=150)
+        n_steps += 1
+
+        epsilon = max(EPSILON_END, EPSILON_START - n_steps/EPSILON_DECAY_STEPS)
+        reward = rl_agent.play_step(net=q_network, epsilon=epsilon, device=device)
+
+
+        if reward:
+            total_scores.append(reward)
+            # writer.add_scalar('reward', reward, n_steps)
+
+            if len(total_scores) % 100 == 0:
+                speed = (n_steps - ts_steps) / (time.time() - ts)
+                ts_steps = n_steps
+                ts = time.time()
+                mean_reward = sum(total_scores[-100:]) / (len(total_scores[-100:]))
+                print(f"Step {n_steps}: {len(total_scores)} full games mean score {mean_reward: .2f} "
+                      f"eps {epsilon: 0.3f} speed {int(speed)} steps/s")
+
+                # writer.add_scalar("epsilon", epsilon, n_steps)
+                # writer.add_scalar("speed", speed, n_steps)
+                # writer.add_scalar("mean_reawrd", mean_reward, n_steps)
+
+        if n_steps % TARGET_NETWORK_SYNC_STEPS == 0:
+            print("SYNC TARGET NETWORK...")
+            tgt_net.load_state_dict(q_network.state_dict())
+
+        optimizer.zero_grad()
+        batch = buffer.sample(BATCH_SIZE)
+        loss = q_loss(batch, q_network, tgt_net, device)
+        loss.backward()
+        optimizer.step()
+
+

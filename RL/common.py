@@ -24,7 +24,6 @@ def set_discrete_action_space(positions_count):
 
     return actions
 
-
 def stable_softmax(logits):
     scaled_logits = logits - np.max(logits, axis=1, keepdims=True)
     num = np.exp(scaled_logits)
