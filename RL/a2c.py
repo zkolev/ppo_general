@@ -4,7 +4,7 @@ from torch.multiprocessing import Process, Pipe, Manager, Value
 
 from RL.ppo import PPO
 from RL.parallel_worker import ParWorker
-from RL.worker import  EvalWorker
+from RL.worker import EvalWorker
 import torch
 import os
 
@@ -31,8 +31,10 @@ class A2C(PPO):
         self.model_name = model_name
 
 
-    def run(self, n_workers, updates, epochs, steps, gamma, lam,
-            step_writer, eval_steps, eval_iters, fs_loc ):
+    def run(self,
+            n_workers, updates, epochs, steps, gamma, lam,
+            step_writer, eval_steps, eval_iters, fs_loc):
+
 
         workers, channels, rollouts_done, inits_done = \
             self.__start_workers(n_workers, steps, gamma, lam)
@@ -44,45 +46,59 @@ class A2C(PPO):
             time.sleep(1)
 
         else:
-            print('All workers have been initialized. Start generating trajectories ')
+            print('All workers have been initialized. ')
 
-        for epoch in range(updates):
+        # ENTER THE MAIN TRAINING LOOP:
+        for update in range(updates):
 
-            # restart the rollouts
+            # Track time
+            update_start_time = time.time()
+
+            # Tell the environments to start generating
+            # data (trajectories) for N steps
             self.__restart_rollouts(inits_done)
 
             while not all(rollouts_done):
-                # Eval new policy while the workers
-                # are generating experience
-                time.sleep(1)
+                time.sleep(0.5)
 
             else:
+                # Collect the trajectories from the workers
                 traj = [conn.recv() for conn in channels]
+                rendering_time = time.time()
 
-                # Update the model
+                # Perform the gradient update
                 new_weights = self.update(traj, epochs)
+                gradinet_update_time = time.time()
 
 
-                # Update eval
-                if epoch % eval_steps == 0:
-                    print('Evaluating policy ... ')
+                print(f'Step {update}: Rendering time: {rendering_time - update_start_time :.1f} sec ; '
+                      f'Gradient update time {gradinet_update_time - rendering_time:.1f} sec;')
+
+                # Evaluate the new policy
+                if update % eval_steps == 0:
                     with torch.no_grad():
                         with EvalWorker() as e:
                             scores = e.eval_policy(eval_iters, new_weights)
 
-                    step_writer.add_scalar('Scores\Average', scores.mean(), global_step = epoch)
+                    step_writer.add_scalar('Scores\Average', scores.mean(), global_step=update)
+                    eval_time = time.time()
+                    total_eval_time_sec = eval_time - gradinet_update_time
 
-                # Update histograms:
-                if epoch % 50 == 0:
-                    step_writer.add_histogram('Scores\Distribution', scores, global_step=epoch)
+                    print(f"Model Eval time {total_eval_time_sec:.2f} sec;"
+                          f" {total_eval_time_sec/eval_steps:.2f} sec per game")
+
+                # Track the distribution of weights over time:
+                if update % 50 == 0:
+                    step_writer.add_histogram('Scores\Distribution', scores, global_step=update)
 
                     for wk in new_weights:
-                        step_writer.add_histogram(wk.replace('.', '/'), new_weights[wk], global_step=epoch)
+                        step_writer.add_histogram(wk.replace('.', '/'), new_weights[wk], global_step=update)
 
-                if epoch % 50 == 0:
-                    _fname = f"{int(time.time())}_{self.model_name}_Update_{epoch}.pth"
+                    # TODO: Save model weigths to disk
+                    _fname = f"{int(time.time())}_{self.model_name}_Update_{update}.pth"
                     chkpt = os.path.join(fs_loc['checkpoints'], _fname)
                     print(f'Checkpoint to {chkpt} ... ')
+
 
         self.__terminate_workers(workers)
 

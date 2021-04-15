@@ -8,10 +8,6 @@ from torch.multiprocessing import set_start_method
 
 INPUT_SIZE = 21  # State representation
 OUTPUT_SIZE = 45  # Num actions
-PERSIST_STATE = True
-PAYLOAD_ROOT_DIR = None
-TENSORBOARD_LOC = None
-MODEL_NAME = 'A2C_Run_2_0_0'
 
 # Restore 
 RESTORE = False
@@ -19,6 +15,7 @@ MODEL_CHECKPOINT = None
 CHECKPOINT_EVERY_N_UPDATES = 25
 NUMBER_OF_WORKERS  = 4
 
+# Algorithm parameters
 LEARNING_RATE = 2.5e-3
 MINIBATCH_SIZE = 1024
 ROLLOUT_SIZE = 8192
@@ -40,6 +37,11 @@ LOSS_POLICY_WEIGHT = 1
 LOSS_VALUE_WEIGHT = 0.10
 LOSS_ENTROPY_WEIGHT = 0.01
 
+PERSIST_STATE = True
+PAYLOAD_ROOT_DIR = None
+TENSORBOARD_LOC = None
+MODEL_NAME = 'A2C_Run_2_0_0'
+FORCE_CPU = False
 
 root_dir = os.path.abspath(__file__ + '/..')
 

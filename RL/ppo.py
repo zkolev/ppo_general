@@ -3,6 +3,9 @@ import torch.nn.functional as fn
 from RL.common import get_distribution_from_logits
 
 
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+print(device)
+
 class GeneralGameTrajectories(torch.utils.data.Dataset):
     def __init__(self, rollouts, normalize_advantages=True):
         super(GeneralGameTrajectories).__init__()
@@ -12,7 +15,7 @@ class GeneralGameTrajectories(torch.utils.data.Dataset):
 
         self.data = {}
         for k in traj_keys:
-            self.data[k] = torch.cat([d[k] for d in rollouts])
+            self.data[k] = torch.cat([d[k] for d in rollouts]).to(device)
 
         # Normalize advantages:
         if normalize_advantages:
@@ -79,7 +82,7 @@ class PPO(object):
 
         self.network = ActCritNetwork(input_size=input_size,
                                       num_actions=num_actions,
-                                      eval_only=False)
+                                      eval_only=False).to(device)
         # Optimizer
         self.optimizer = torch.optim.Adam(self.network.parameters(), lr=lr)
 
@@ -119,7 +122,7 @@ class PPO(object):
         dl = torch.utils.data.DataLoader(ds,
                                          batch_size=self.minibatch_size,
                                          shuffle=True,
-                                         num_workers=2)
+                                         num_workers=1)
 
         for epoch in range(epochs):
 
