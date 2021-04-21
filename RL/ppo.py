@@ -32,14 +32,15 @@ class GeneralGameTrajectories(torch.utils.data.Dataset):
 class ActCritNetwork(torch.nn.Module):
     def __init__(self, input_size, num_actions, eval_only=True):
         super(ActCritNetwork, self).__init__()
-        self.in_layer = torch.nn.Linear(input_size, 20)
-        self.l_1 = torch.nn.Linear(20, 10)
-        # self.l_2 = torch.nn.Linear(10, 5)
+        self.in_layer = torch.nn.Linear(input_size, 30)
+        
+        self.l_1 = torch.nn.Linear(30, 25)
+        self.l_2 = torch.nn.Linear(25, 21)
 
-        self.pl_1 = torch.nn.Linear(10, 10)
-        self.pl_out = torch.nn.Linear(10, num_actions)
+        self.pl_1 = torch.nn.Linear(21, 20)
+        self.pl_out = torch.nn.Linear(20, num_actions)
 
-        self.v_1 = torch.nn.Linear(10, 5)
+        self.v_1 = torch.nn.Linear(21, 5)
         self.v_out = torch.nn.Linear(5, 1)
 
         # Disable gradient calculation
@@ -50,6 +51,7 @@ class ActCritNetwork(torch.nn.Module):
         # input_data = torch.from_numpy(x).float().detach()
         x = fn.relu(self.in_layer(input_data))
         x = fn.relu(self.l_1(x))
+        x = fn.relu(self.l_2(x)) + input_data 
 
         pl = fn.relu(self.pl_1(x))
         vlr = fn.relu(self.v_1(x))
@@ -65,6 +67,8 @@ class ActCritNetwork(torch.nn.Module):
 
         return distr.sample()
 
+
+
 class PPO(object):
     def __init__(self,
                  input_size,
@@ -75,7 +79,7 @@ class PPO(object):
                  w_policy=1,
                  w_vf=0.5,
                  w_entropy=1,
-                 epoch_writer=None):
+                 last_epoch=0):
 
         self.network = ActCritNetwork(input_size=input_size,
                                       num_actions=num_actions,
@@ -90,8 +94,8 @@ class PPO(object):
         self.minibatch_size = minibatch_size
 
         self.global_step = 0
-        self.updates = 0
-        self.writer = epoch_writer
+        self.last_epoch = last_epoch
+        self.writer = None
 
 
     def update(self, traj, epochs=5):
@@ -146,12 +150,21 @@ class PPO(object):
 
         if self.writer:
             for l_label, l_value in zip(['loss', 'policy', 'value', 'entropy'],[c_loss, p_loss, v_loss, e_loss]):
-                self.writer.add_scalar(f'Loss/{l_label}', torch.tensor(l_value).mean(), self.updates)
+                self.writer.add_scalar(f'Loss/{l_label}', torch.tensor(l_value).mean(), self.last_epoch)
 
-            self.updates += 1
+            self.last_epoch += 1
 
-        print(f"Loss after update {self.updates} is {torch.tensor(c_loss).mean().item()}")
+        print(f"Loss after update {self.last_epoch} is {torch.tensor(c_loss).mean().item()}")
         return self.network.state_dict()
+    
+    def restore_from_checkpoint(netwokr_state, optimizer_state):
+        """Restores the state of the network and the optimizer
+        params: 
+            network_state: dict 
+
+        """
+        self.network.load_state_dict(netwokr_state)
+        self.optimizer.load_state_dict(optimizer_state)
 
     def __ppo_loss(self,
                    states,
