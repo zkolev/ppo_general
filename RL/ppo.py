@@ -2,6 +2,15 @@ import torch
 import torch.nn.functional as fn
 from RL.common import get_distribution_from_logits
 
+# The network is very small
+FORCE_CPU = True
+device = torch.device("cuda" if torch.cuda.is_available() and not FORCE_CPU else "cpu")
+
+if device.type == 'cuda':
+    print(torch.cuda.get_device_name(0))
+    print('Memory Usage:')
+    print('Allocated:', round(torch.cuda.memory_allocated(0)/1024**3,1), 'GB')
+    print('Cached:   ', round(torch.cuda.memory_reserved(0)/1024**3,1), 'GB')
 
 class GeneralGameTrajectories(torch.utils.data.Dataset):
     def __init__(self, rollouts, normalize_advantages=True):
@@ -23,7 +32,7 @@ class GeneralGameTrajectories(torch.utils.data.Dataset):
         self.n_samples = self.data['states'].size()[0]
 
     def __getitem__(self, index):
-        return {k: self.data[k][index] for k in self.data}
+        return {k: self.data[k][index].to(device) for k in self.data}
 
     def __len__(self):
         return self.n_samples
@@ -32,15 +41,15 @@ class GeneralGameTrajectories(torch.utils.data.Dataset):
 class ActCritNetwork(torch.nn.Module):
     def __init__(self, input_size, num_actions, eval_only=True):
         super(ActCritNetwork, self).__init__()
-        self.in_layer = torch.nn.Linear(input_size, 30)
+        self.in_layer = torch.nn.Linear(input_size, 15)
         
-        self.l_1 = torch.nn.Linear(30, 25)
-        self.l_2 = torch.nn.Linear(25, 21)
+        self.l_1 = torch.nn.Linear(15, 15)
+        self.l_2 = torch.nn.Linear(15, 10)
 
-        self.pl_1 = torch.nn.Linear(21, 20)
-        self.pl_out = torch.nn.Linear(20, num_actions)
+        self.pl_1 = torch.nn.Linear(10, 10)
+        self.pl_out = torch.nn.Linear(10, num_actions)
 
-        self.v_1 = torch.nn.Linear(21, 5)
+        self.v_1 = torch.nn.Linear(10, 5)
         self.v_out = torch.nn.Linear(5, 1)
 
         # Disable gradient calculation
@@ -51,7 +60,7 @@ class ActCritNetwork(torch.nn.Module):
         # input_data = torch.from_numpy(x).float().detach()
         x = fn.relu(self.in_layer(input_data))
         x = fn.relu(self.l_1(x))
-        x = fn.relu(self.l_2(x)) + input_data 
+        x = fn.relu(self.l_2(x))
 
         pl = fn.relu(self.pl_1(x))
         vlr = fn.relu(self.v_1(x))
@@ -83,7 +92,7 @@ class PPO(object):
 
         self.network = ActCritNetwork(input_size=input_size,
                                       num_actions=num_actions,
-                                      eval_only=False)
+                                      eval_only=False).to(device)
         # Optimizer
         self.optimizer = torch.optim.Adam(self.network.parameters(), lr=lr)
 
@@ -122,8 +131,7 @@ class PPO(object):
         ds = GeneralGameTrajectories(traj)
         dl = torch.utils.data.DataLoader(ds,
                                          batch_size=self.minibatch_size,
-                                         shuffle=True,
-                                         num_workers=2)
+                                         shuffle=True)
 
         for epoch in range(epochs):
 
@@ -175,7 +183,6 @@ class PPO(object):
                    action_masks=None,
                    **kwargs):
         # The input will be tensors
-
         # We get logits estimate
         v_hat, p_hat = self.network(states)
         distr = get_distribution_from_logits(p_hat, action_masks)

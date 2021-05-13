@@ -1,7 +1,7 @@
 # Import multiprocessing
 
 import multiprocessing as mp
-from multiprocessing import Process, Pipe, Manager, Value
+from multiprocessing import Process, Manager, Value
 
 from RL.ppo import PPO
 from RL.parallel_worker import ParWorker
@@ -135,7 +135,7 @@ class A2C(PPO):
 
 
             # Update histograms:
-            if updt % 50 == 0:
+            if updt % 100 == 0:
                 self.update_writer.add_histogram('Scores\Distribution', scores, global_step=updt)
 
                 for wk in new_weights:
@@ -189,7 +189,7 @@ class A2C(PPO):
         _state_dict = self.network.state_dict()
         # Update the shared weights
         for k in _state_dict:
-            self.s_weights[k] = _state_dict[k]
+            self.s_weights[k] = _state_dict[k].cpu()
 
     @staticmethod
     def __terminate_workers(workers):
